@@ -1,6 +1,6 @@
 # Silent Items Give  
 
-Toggling broadcast messages to all players when issuing in-game items via Harmony patching.
+Allows toggling silent item giving(chat notifications and ownership) via Harmony patching.
 **P.S.** By default, silent item giving is **enabled**.  
 
 ## Contacts  
@@ -21,6 +21,7 @@ Toggling broadcast messages to all players when issuing in-game items via Harmon
 
 ## Features  
 
+- The ability to disable **item ownership** assignment;
 - The ability to disable item give messages via the '**give**' command;
 - The ability to disable item give messages via the '**giveid**' command;
 - The ability to disable item give messages via the '**givearm**' command;

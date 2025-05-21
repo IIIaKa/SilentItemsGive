@@ -1,6 +1,6 @@
 # Silent Items Give  
 
-Allows toggling silent item giving(chat notifications and ownership) via Harmony patching.
+Allows toggling silent item giving(chat notifications and ownership) via Harmony patching.  
 **P.S.** By default, silent item giving is **enabled**.  
 
 ## Contacts  

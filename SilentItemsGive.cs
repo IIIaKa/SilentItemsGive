@@ -31,7 +31,6 @@
 *  Copyright © 2025 IIIaKa
 */
 
-// Reference: 0Harmony
 using HarmonyLib;
 using System;
 using System.Reflection;
@@ -42,19 +41,23 @@ using Oxide.Core.Libraries.Covalence;
 
 namespace Oxide.Plugins
 {
-    [Info("Silent Items Give", "IIIaKa", "0.1.0")]
+    [Info("Silent Items Give", "IIIaKa", "0.1.1")]
     [Description("Allows toggling silent item giving(chat notifications and ownership) via Harmony patching.")]
     class SilentItemsGive : RustPlugin
     {
         #region ~Variables~
         private Harmony _harmony;
-        private static bool _debug = false, _silentGive = true;
+        private static bool _silentGive = true;
         private const string PERMISSION_ADMIN = "silentitemsgive.admin", IdForHarmony = "iiiaka.silentitemsgive";
         #endregion
         
         #region ~Oxide Hooks~
         void OnServerInitialized(bool initial)
         {
+            permission.RegisterPermission(PERMISSION_ADMIN, this);
+            AddCovalenceCommand("silentgive.toggle", nameof(Toggle_Command));
+            _silentGive = Interface.Oxide.DataFileSystem.ReadObject<object>(Name) is bool savedVal ? savedVal : true;
+            
 #if CARBON
             if (!Carbon.Community.Runtime.Config.IsModded)
 #else
@@ -74,35 +77,25 @@ namespace Oxide.Plugins
             PatchMethod(typeof(ConVar.Inventory), "giveBp", new HarmonyMethod(typeof(SilentItemsGive), nameof(Transpiler_GiveBp)), new Type[] { typeof(ConsoleSystem.Arg) });
             PatchMethod(typeof(ConVar.Inventory), "copyTo", new HarmonyMethod(typeof(SilentItemsGive), nameof(Transpiler_CopyTo)), new Type[] { typeof(BasePlayer), typeof(BasePlayer) });
             
-            Puts($"Patch '{IdForHarmony}' by '{Author}' has been successfully applied!");
-            permission.RegisterPermission(PERMISSION_ADMIN, this);
-            AddCovalenceCommand("silentgive.toggle", nameof(Command_Toggle));
-            _silentGive = Interface.Oxide.DataFileSystem.ReadObject<object>(Name) is bool savedVal ? savedVal : true;
-            
             void PatchMethod(Type targetType, string methodName, HarmonyMethod transpiler, Type[] parameters = null)
             {
                 var targetMethod = parameters == null ? AccessTools.Method(targetType, methodName) : AccessTools.Method(targetType, methodName, parameters);
                 if (targetMethod == null)
                     PrintError($"Failed to find method {targetType.Name}.{methodName}!");
                 else
-                {
                     _harmony.Patch(targetMethod, transpiler: transpiler);
-                    if (_debug)
-                        PrintWarning($"Patched {targetType.Name}.{methodName} successfully!");
-                }
             }
         }
 
         void Unload()
         {
             _harmony?.UnpatchAll(IdForHarmony);
-            Puts($"Patch '{IdForHarmony}' by '{Author}' has been successfully removed!");
             Interface.Oxide.DataFileSystem.WriteObject(Name, _silentGive);
         }
         #endregion
         
         #region ~Commands~
-        private void Command_Toggle(IPlayer player, string command, string[] args)
+        private void Toggle_Command(IPlayer player, string command, string[] args)
         {
             if (player == null || (!player.IsAdmin && !permission.UserHasPermission(player.Id, PERMISSION_ADMIN))) return;
             
@@ -129,233 +122,75 @@ namespace Oxide.Plugins
         #region ~Harmony Patch~
         public static IEnumerable<CodeInstruction> Transpiler_Give(IEnumerable<CodeInstruction> instructions, ILGenerator generator)
         {
-            if (_debug)
-                Interface.Oxide.LogError("**********START - give**********");
-
-            int chatIndex = -1, ownerIndex = -1;
             CodeInstruction code;
+            int chatIndex = -1, ownerIndex = -1;
             var result = new List<CodeInstruction>(instructions);
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********Before**********");
-                Interface.Oxide.LogInfo("...");
-            }
             for (int i = 0; i < result.Count; i++)
             {
                 code = result[i];
-
-                if (_debug && ((i >= 48 && i < 58) || (i >= 198 && i < 208)))
-                {
-                    if (i == 198)
-                        Interface.Oxide.LogInfo("...");
-                    Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-                }
-
-                if (code.operand is MethodInfo method)
-                {
-                    if (code.opcode == OpCodes.Call && method.Name == "Log")
-                        chatIndex = i;
-                    else if (code.opcode == OpCodes.Callvirt && method.Name == "SetItemOwnership")
-                        ownerIndex = i;
-                }
+                if (code.operand is not MethodInfo method) continue;
+                if (code.opcode == OpCodes.Call && method.Name == "Log")
+                    chatIndex = i;
+                else if (code.opcode == OpCodes.Callvirt && method.Name == "SetItemOwnership")
+                    ownerIndex = i;
             }
-            if (_debug)
-            {
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-            }
-
             if (chatIndex >= 0)
-                Patch_ChatMessage(result, generator, chatIndex, "give");
+                Patch_ChatMessage(result, generator, chatIndex);
             if (ownerIndex >= 0)
-                Patch_SetItemOwnership(result, generator, ownerIndex, "give");
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********After**********");
-                Interface.Oxide.LogInfo("...");
-                for (int i = 0; i < result.Count; i++)
-                {
-                    if ((i >= 48 && i < 58) || (i >= 200 && i < 210))
-                    {
-                        code = result[i];
-                        if (i == 200)
-                            Interface.Oxide.LogInfo("...");
-                        Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-                    }
-                }
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-
-                Interface.Oxide.LogError("**********END - give**********");
-            }
-
+                Patch_SetItemOwnership(result, generator, ownerIndex);
             return result;
         }
         
         public static IEnumerable<CodeInstruction> Transpiler_GiveId(IEnumerable<CodeInstruction> instructions, ILGenerator generator)
         {
-            if (_debug)
-                Interface.Oxide.LogError("**********START - giveid**********");
-
-            int chatIndex = -1, ownerIndex = -1;
             CodeInstruction code;
+            int chatIndex = -1, ownerIndex = -1;
             var result = new List<CodeInstruction>(instructions);
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********Before**********");
-                Interface.Oxide.LogInfo("...");
-            }
             for (int i = 0; i < result.Count; i++)
             {
                 code = result[i];
-                if (_debug && ((i >= 32 && i < 42) || (i >= 94 && i < 104)))
-                {
-                    if (i == 94)
-                        Interface.Oxide.LogInfo("...");
-                    Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-                }
-
-                if (code.operand is MethodInfo method)
-                {
-                    if (code.opcode == OpCodes.Call && method.Name == "Log")
-                        chatIndex = i;
-                    else if (code.opcode == OpCodes.Callvirt && method.Name == "SetItemOwnership")
-                        ownerIndex = i;
-                }
+                if (code.operand is not MethodInfo method) continue;
+                if (code.opcode == OpCodes.Call && method.Name == "Log")
+                    chatIndex = i;
+                else if (code.opcode == OpCodes.Callvirt && method.Name == "SetItemOwnership")
+                    ownerIndex = i;
             }
-            if (_debug)
-            {
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-            }
-
             if (chatIndex >= 0)
-                Patch_ChatMessage(result, generator, chatIndex, "giveid");
+                Patch_ChatMessage(result, generator, chatIndex);
             if (ownerIndex >= 0)
-                Patch_SetItemOwnership(result, generator, ownerIndex, "giveid");
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********After**********");
-                Interface.Oxide.LogInfo("...");
-                for (int i = 0; i < result.Count; i++)
-                {
-                    if ((i >= 32 && i < 42) || (i >= 96 && i < 106))
-                    {
-                        code = result[i];
-                        if (i == 96)
-                            Interface.Oxide.LogInfo("...");
-                        Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-                    }
-                }
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-
-                Interface.Oxide.LogError("**********END - giveid**********");
-            }
-
+                Patch_SetItemOwnership(result, generator, ownerIndex);
             return result;
         }
         
         public static IEnumerable<CodeInstruction> Transpiler_GiveArm(IEnumerable<CodeInstruction> instructions, ILGenerator generator)
         {
-            if (_debug)
-                Interface.Oxide.LogError("**********START - givearm**********");
-
-            int chatIndex = -1, ownerIndex = -1;
             CodeInstruction code;
+            int chatIndex = -1, ownerIndex = -1;
             var result = new List<CodeInstruction>(instructions);
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********Before**********");
-                Interface.Oxide.LogInfo("...");
-            }
             for (int i = 0; i < result.Count; i++)
             {
                 code = result[i];
-                if (_debug && ((i >= 32 && i < 42) || (i >= 97 && i < 107)))
-                {
-                    if (i == 97)
-                        Interface.Oxide.LogInfo("...");
-                    Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-                }
-
-                if (code.operand is MethodInfo method)
-                {
-                    if (code.opcode == OpCodes.Call && method.Name == "Log")
-                        chatIndex = i;
-                    else if (code.opcode == OpCodes.Callvirt && method.Name == "SetItemOwnership")
-                        ownerIndex = i;
-                }
+                if (code.operand is not MethodInfo method) continue;
+                if (code.opcode == OpCodes.Call && method.Name == "Log")
+                    chatIndex = i;
+                else if (code.opcode == OpCodes.Callvirt && method.Name == "SetItemOwnership")
+                    ownerIndex = i;
             }
-            if (_debug)
-            {
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-            }
-
             if (chatIndex >= 0)
-                Patch_ChatMessage(result, generator, chatIndex, "givearm");
+                Patch_ChatMessage(result, generator, chatIndex);
             if (ownerIndex >= 0)
-                Patch_SetItemOwnership(result, generator, ownerIndex, "givearm");
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********After**********");
-                Interface.Oxide.LogInfo("...");
-                for (int i = 0; i < result.Count; i++)
-                {
-                    if ((i >= 32 && i < 42) || (i >= 99 && i < 109))
-                    {
-                        code = result[i];
-                        if (i == 99)
-                            Interface.Oxide.LogInfo("...");
-                        Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-                    }
-                }
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-
-                Interface.Oxide.LogError("**********END - givearm**********");
-            }
-
+                Patch_SetItemOwnership(result, generator, ownerIndex);
             return result;
         }
         
         public static IEnumerable<CodeInstruction> Transpiler_GiveTo(IEnumerable<CodeInstruction> instructions, ILGenerator generator)
         {
-            if (_debug)
-                Interface.Oxide.LogError("**********START - giveto**********");
-
             int chatIndex = -1, ownerIndex = -1;
             CodeInstruction code, jumpCode = null;
             var result = new List<CodeInstruction>(instructions);
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********Before**********");
-                Interface.Oxide.LogInfo("...");
-            }
             for (int i = 0; i < result.Count; i++)
             {
                 code = result[i];
-                if (_debug && ((i >= 53 && i < 63) || (i >= 115 && i < 125)))
-                {
-                    if (i == 115)
-                        Interface.Oxide.LogInfo("...");
-                    Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-                }
-
                 if (code.opcode == OpCodes.Ret)
                     jumpCode = code;
                 else if (code.operand is MethodInfo method)
@@ -366,66 +201,21 @@ namespace Oxide.Plugins
                         ownerIndex = i;
                 }
             }
-            if (_debug)
-            {
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-            }
-
             if (chatIndex >= 0 && jumpCode != null)
-                Patch_ChatMessage(result, generator, chatIndex, "giveto", jumpCode);
+                Patch_ChatMessage(result, generator, chatIndex, jumpCode);
             if (ownerIndex >= 0)
-                Patch_SetItemOwnership(result, generator, ownerIndex, "giveto");
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********After**********");
-                Interface.Oxide.LogInfo("...");
-                for (int i = 0; i < result.Count; i++)
-                {
-                    if ((i >= 53 && i < 63) || (i >= 117 && i < 119))
-                    {
-                        code = result[i];
-                        if (i == 117)
-                            Interface.Oxide.LogInfo("...");
-                        Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-                    }
-                }
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-
-                Interface.Oxide.LogError("**********END - giveto**********");
-            }
-
+                Patch_SetItemOwnership(result, generator, ownerIndex);
             return result;
         }
         
         public static IEnumerable<CodeInstruction> Transpiler_GiveAll(IEnumerable<CodeInstruction> instructions, ILGenerator generator)
         {
-            if (_debug)
-                Interface.Oxide.LogError("**********START - giveall**********");
-
             int targetIndex = -1, ownerIndex = -1;
             CodeInstruction code, jumpCode = null;
             var result = new List<CodeInstruction>(instructions);
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********Before**********");
-                Interface.Oxide.LogInfo("...");
-            }
             for (int i = 0; i < result.Count; i++)
             {
                 code = result[i];
-                if (_debug && ((i >= 46 && i < 56) || (i >= 116 && i < 126)))
-                {
-                    if (i == 116)
-                        Interface.Oxide.LogInfo("...");
-                    Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-                }
-
                 if (code.opcode == OpCodes.Ret)
                     jumpCode = code;
                 else if (code.opcode == OpCodes.Endfinally)
@@ -433,206 +223,81 @@ namespace Oxide.Plugins
                 else if (code.operand is MethodInfo method && code.opcode == OpCodes.Callvirt && method.Name == "SetItemOwnership")
                     ownerIndex = i;
             }
-            if (_debug)
-            {
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-            }
-
             if (targetIndex >= 0 && jumpCode != null)
-                Patch_AfterForeach(result, generator, targetIndex, "giveall", jumpCode);
+                Patch_AfterForeach(result, generator, targetIndex, jumpCode);
             if (ownerIndex >= 0)
-                Patch_SetItemOwnership(result, generator, ownerIndex, "giveall");
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********After**********");
-                Interface.Oxide.LogInfo("...");
-                for (int i = 0; i < result.Count; i++)
-                {
-                    if ((i >= 46 && i < 56) || (i >= 118 && i < 128))
-                    {
-                        code = result[i];
-                        if (i == 118)
-                            Interface.Oxide.LogInfo("...");
-                        Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-                    }
-                }
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-
-                Interface.Oxide.LogError("**********END - giveall**********");
-            }
-
+                Patch_SetItemOwnership(result, generator, ownerIndex);
             return result;
         }
         
         public static IEnumerable<CodeInstruction> Transpiler_GiveBp(IEnumerable<CodeInstruction> instructions, ILGenerator generator)
         {
-            if (_debug)
-                Interface.Oxide.LogError("**********START - giveBp**********");
-
             int chatIndex = -1;
             CodeInstruction code;
             var result = new List<CodeInstruction>(instructions);
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********Before**********");
-                Interface.Oxide.LogInfo("...");
-            }
             for (int i = 0; i < result.Count; i++)
             {
                 code = result[i];
-                if (_debug && i >= 107 && i < 117)
-                    Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-
                 if (code.opcode == OpCodes.Call && code.operand is MethodInfo method && method.Name == "Log")
                     chatIndex = i;
             }
-            if (_debug)
-            {
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-            }
-
             if (chatIndex >= 0)
-                Patch_ChatMessage(result, generator, chatIndex, "giveBp");
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********After**********");
-                Interface.Oxide.LogInfo("...");
-                for (int i = 0; i < result.Count; i++)
-                {
-                    if (i >= 107 && i < 117)
-                    {
-                        code = result[i];
-                        Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-                    }
-                }
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-
-                Interface.Oxide.LogError("**********END - giveBp**********");
-            }
-
+                Patch_ChatMessage(result, generator, chatIndex);
             return result;
         }
         
         public static IEnumerable<CodeInstruction> Transpiler_CopyTo(IEnumerable<CodeInstruction> instructions, ILGenerator generator)
         {
-            if (_debug)
-                Interface.Oxide.LogError("**********START - copyTo**********");
-
             int targetIndex = -1;
             CodeInstruction code;
             var result = new List<CodeInstruction>(instructions);
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********Before**********");
-                Interface.Oxide.LogInfo("...");
-            }
             for (int i = 0; i < result.Count; i++)
             {
                 code = result[i];
-                if (_debug && i >= 192 && i < 202)
-                    Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-
                 if (code.opcode == OpCodes.Endfinally)
                     targetIndex = i;
             }
-            if (_debug)
-            {
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-            }
-
             if (targetIndex >= 0)
-                Patch_AfterForeach(result, generator, targetIndex, "copyTo");
-
-            if (_debug)
-            {
-                Interface.Oxide.LogWarning("**********After**********");
-                Interface.Oxide.LogInfo("...");
-                for (int i = 0; i < result.Count; i++)
-                {
-                    if (i >= 192 && i < 202)
-                    {
-                        code = result[i];
-                        Interface.Oxide.LogInfo($"Code[{i}]: {code.opcode} {code.operand}");
-                    }
-                }
-                Interface.Oxide.LogInfo("...");
-                code = result[^1];
-                Interface.Oxide.LogInfo($"Code[{result.Count - 1}]: {code.opcode} {code.operand}");
-
-                Interface.Oxide.LogError("**********END - copyTo**********");
-            }
-
+                Patch_AfterForeach(result, generator, targetIndex);
             return result;
         }
         
-        private static void Patch_ChatMessage(List<CodeInstruction> result, ILGenerator generator, int index, string methodName, CodeInstruction jumpCode = null)
+        private static void Patch_ChatMessage(List<CodeInstruction> result, ILGenerator generator, int index, CodeInstruction jumpCode = null)
         {
-            if (_debug)
-                Interface.Oxide.LogWarning($"Found the index of the last 'Log' method at {index}, starting to patch '{methodName}' method...");
-            
             if (jumpCode == null)
                 jumpCode = result[index + 4];
             if (jumpCode.labels == null)
                 jumpCode.labels = new List<Label>();
             var jumpLabel = generator.DefineLabel();
             jumpCode.labels.Add(jumpLabel);
-
+            
             result.Insert(index + 1, GetSilentGiveInstruction());
             result.Insert(index + 2, new CodeInstruction(OpCodes.Brtrue_S, jumpLabel));
-            
-            if (_debug)
-                Interface.Oxide.LogWarning($"Successfully finished patching '{methodName}' method.");
         }
         
-        private static void Patch_AfterForeach(List<CodeInstruction> result, ILGenerator generator, int index, string methodName, CodeInstruction jumpCode = null)
+        private static void Patch_AfterForeach(List<CodeInstruction> result, ILGenerator generator, int index, CodeInstruction jumpCode = null)
         {
-            if (_debug)
-                Interface.Oxide.LogWarning($"Found the index of the last 'Endfinally' method at {index}, starting to patch '{methodName}' method...");
-            
             if (jumpCode == null)
                 jumpCode = result[index + 4];
             if (jumpCode.labels == null)
                 jumpCode.labels = new List<Label>();
             var jumpLabel = generator.DefineLabel();
             jumpCode.labels.Add(jumpLabel);
-
+            
             result.Insert(index, GetSilentGiveInstruction());
             result.Insert(index + 1, new CodeInstruction(OpCodes.Brtrue_S, jumpLabel));
-
-            if (_debug)
-                Interface.Oxide.LogWarning($"Successfully finished patching '{methodName}' method.");
         }
         
-        private static void Patch_SetItemOwnership(List<CodeInstruction> result, ILGenerator generator, int index, string methodName)
+        private static void Patch_SetItemOwnership(List<CodeInstruction> result, ILGenerator generator, int index)
         {
-            if (_debug)
-                Interface.Oxide.LogWarning($"Found the index of the last 'SetItemOwnership' method at {index}, starting to patch '{methodName}' method...");
-
             var jumpCode = result[index + 2];
             if (jumpCode.labels == null)
                 jumpCode.labels = new List<Label>();
             var jumpLabel = generator.DefineLabel();
             jumpCode.labels.Add(jumpLabel);
-
+            
             result.Insert(index - 3, GetSilentGiveInstruction());
             result.Insert(index - 2, new CodeInstruction(OpCodes.Brtrue_S, jumpLabel));
-
-            if (_debug)
-                Interface.Oxide.LogWarning($"Successfully finished patching '{methodName}' method.");
         }
         
         private static CodeInstruction GetSilentGiveInstruction() => new CodeInstruction(OpCodes.Ldsfld, AccessTools.Field(typeof(SilentItemsGive), nameof(_silentGive)));

@@ -25,6 +25,7 @@ Allows toggling silent item giving(chat notifications and ownership) via Harmony
 - The ability to disable item give messages via the '**give**' command;
 - The ability to disable item give messages via the '**giveid**' command;
 - The ability to disable item give messages via the '**givearm**' command;
+- The ability to disable item give messages via the '**giveequip**' command;
 - The ability to disable item give messages via the '**giveto**' command;
 - The ability to disable item give messages via the '**giveall**' command;
 - The ability to disable item blueprint give messages via the '**giveBp**' command;

@@ -28,7 +28,7 @@
 *  
 *  Lone.Design plugin page: https://lone.design/product/silent-items-give/
 *
-*  Copyright © 2025 IIIaKa
+*  Copyright © 2025-2026 IIIaKa
 */
 
 using HarmonyLib;
@@ -41,7 +41,7 @@ using Oxide.Core.Libraries.Covalence;
 
 namespace Oxide.Plugins
 {
-    [Info("Silent Items Give", "IIIaKa", "0.1.1")]
+    [Info("Silent Items Give", "IIIaKa", "0.1.2")]
     [Description("Allows toggling silent item giving(chat notifications and ownership) via Harmony patching.")]
     class SilentItemsGive : RustPlugin
     {
@@ -68,10 +68,10 @@ namespace Oxide.Plugins
             }
             
             _harmony = new Harmony(IdForHarmony);
-            
             PatchMethod(typeof(ConVar.Inventory), "give", new HarmonyMethod(typeof(SilentItemsGive), nameof(Transpiler_Give)), new Type[] { typeof(ConsoleSystem.Arg) });
             PatchMethod(typeof(ConVar.Inventory), "giveid", new HarmonyMethod(typeof(SilentItemsGive), nameof(Transpiler_GiveId)), new Type[] { typeof(ConsoleSystem.Arg) });
             PatchMethod(typeof(ConVar.Inventory), "givearm", new HarmonyMethod(typeof(SilentItemsGive), nameof(Transpiler_GiveArm)), new Type[] { typeof(ConsoleSystem.Arg) });
+            PatchMethod(typeof(ConVar.Inventory), "giveequip", new HarmonyMethod(typeof(SilentItemsGive), nameof(Transpiler_GiveEquip)), new Type[] { typeof(ConsoleSystem.Arg) });
             PatchMethod(typeof(ConVar.Inventory), "giveto", new HarmonyMethod(typeof(SilentItemsGive), nameof(Transpiler_GiveTo)), new Type[] { typeof(ConsoleSystem.Arg) });
             PatchMethod(typeof(ConVar.Inventory), "giveall", new HarmonyMethod(typeof(SilentItemsGive), nameof(Transpiler_GiveAll)), new Type[] { typeof(ConsoleSystem.Arg) });
             PatchMethod(typeof(ConVar.Inventory), "giveBp", new HarmonyMethod(typeof(SilentItemsGive), nameof(Transpiler_GiveBp)), new Type[] { typeof(ConsoleSystem.Arg) });
@@ -97,7 +97,8 @@ namespace Oxide.Plugins
         #region ~Commands~
         private void Toggle_Command(IPlayer player, string command, string[] args)
         {
-            if (player == null || (!player.IsAdmin && !permission.UserHasPermission(player.Id, PERMISSION_ADMIN))) return;
+            if (player == null || (!player.IsAdmin && !permission.UserHasPermission(player.Id, PERMISSION_ADMIN)))
+                return;
             
             if (args == null || args.Length < 1)
                 _silentGive = !_silentGive;
@@ -128,7 +129,8 @@ namespace Oxide.Plugins
             for (int i = 0; i < result.Count; i++)
             {
                 code = result[i];
-                if (code.operand is not MethodInfo method) continue;
+                if (code.operand is not MethodInfo method)
+                    continue;
                 if (code.opcode == OpCodes.Call && method.Name == "Log")
                     chatIndex = i;
                 else if (code.opcode == OpCodes.Callvirt && method.Name == "SetItemOwnership")
@@ -149,7 +151,8 @@ namespace Oxide.Plugins
             for (int i = 0; i < result.Count; i++)
             {
                 code = result[i];
-                if (code.operand is not MethodInfo method) continue;
+                if (code.operand is not MethodInfo method)
+                    continue;
                 if (code.opcode == OpCodes.Call && method.Name == "Log")
                     chatIndex = i;
                 else if (code.opcode == OpCodes.Callvirt && method.Name == "SetItemOwnership")
@@ -170,7 +173,30 @@ namespace Oxide.Plugins
             for (int i = 0; i < result.Count; i++)
             {
                 code = result[i];
-                if (code.operand is not MethodInfo method) continue;
+                if (code.operand is not MethodInfo method)
+                    continue;
+                if (code.opcode == OpCodes.Call && method.Name == "Log")
+                    chatIndex = i;
+                else if (code.opcode == OpCodes.Callvirt && method.Name == "SetItemOwnership")
+                    ownerIndex = i;
+            }
+            if (chatIndex >= 0)
+                Patch_ChatMessage(result, generator, chatIndex);
+            if (ownerIndex >= 0)
+                Patch_SetItemOwnership(result, generator, ownerIndex);
+            return result;
+        }
+        
+        public static IEnumerable<CodeInstruction> Transpiler_GiveEquip(IEnumerable<CodeInstruction> instructions, ILGenerator generator)
+        {
+            CodeInstruction code;
+            int chatIndex = -1, ownerIndex = -1;
+            var result = new List<CodeInstruction>(instructions);
+            for (int i = 0; i < result.Count; i++)
+            {
+                code = result[i];
+                if (code.operand is not MethodInfo method)
+                    continue;
                 if (code.opcode == OpCodes.Call && method.Name == "Log")
                     chatIndex = i;
                 else if (code.opcode == OpCodes.Callvirt && method.Name == "SetItemOwnership")
@@ -264,10 +290,8 @@ namespace Oxide.Plugins
         
         private static void Patch_ChatMessage(List<CodeInstruction> result, ILGenerator generator, int index, CodeInstruction jumpCode = null)
         {
-            if (jumpCode == null)
-                jumpCode = result[index + 4];
-            if (jumpCode.labels == null)
-                jumpCode.labels = new List<Label>();
+            jumpCode ??= result[index + 4];
+            jumpCode.labels ??= new List<Label>();
             var jumpLabel = generator.DefineLabel();
             jumpCode.labels.Add(jumpLabel);
             
@@ -277,10 +301,8 @@ namespace Oxide.Plugins
         
         private static void Patch_AfterForeach(List<CodeInstruction> result, ILGenerator generator, int index, CodeInstruction jumpCode = null)
         {
-            if (jumpCode == null)
-                jumpCode = result[index + 4];
-            if (jumpCode.labels == null)
-                jumpCode.labels = new List<Label>();
+            jumpCode ??= result[index + 4];
+            jumpCode.labels ??= new List<Label>();
             var jumpLabel = generator.DefineLabel();
             jumpCode.labels.Add(jumpLabel);
             
@@ -291,8 +313,7 @@ namespace Oxide.Plugins
         private static void Patch_SetItemOwnership(List<CodeInstruction> result, ILGenerator generator, int index)
         {
             var jumpCode = result[index + 2];
-            if (jumpCode.labels == null)
-                jumpCode.labels = new List<Label>();
+            jumpCode.labels ??= new List<Label>();
             var jumpLabel = generator.DefineLabel();
             jumpCode.labels.Add(jumpLabel);
             
